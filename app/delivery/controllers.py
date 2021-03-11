@@ -1,4 +1,4 @@
-from flask import Flask, Blueprint
+from flask import Flask, Blueprint, request
 
 module = Blueprint('delivery', __name__)
 
@@ -10,17 +10,17 @@ def index():
 
 @module.route('/couriers', methods=['POST'])
 def add_couriers():
-    return "ADD_COURIERS"
+    return "ADD_COURIERS \n" + str(request.json)
 
 
 @module.route('/couriers/<courier_id>', methods=["PATCH"])
 def edit_courier(courier_id):
-    return "EDIT COURIER " + courier_id
+    return "EDIT COURIER #" + courier_id + "\n" + str(request.json)
 
 
 @module.route('/orders', methods=["POST"])
 def add_orders():
-    return "ADD ORDERS"
+    return "ADD ORDERS\n" + str(request.json)
 
 
 @module.route('/orders/assign', methods=["POST"])
