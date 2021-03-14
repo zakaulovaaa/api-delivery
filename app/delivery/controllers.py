@@ -1,39 +1,35 @@
 from flask import Flask, Blueprint, request
 from .models import Courier, CourierType, Region, db, courier_region, IntervalTime
-import datetime, json
+import datetime
 from jsonschema import validate, Draft7Validator, FormatChecker
-from sqlalchemy import update
-import time
-
-# from ..database import db
 
 module = Blueprint('delivery', __name__)
 
 
-def isIntervalTime(s: str) -> bool:
+def is_interval_time(s: str) -> bool:
     if len(s) != 11 or s.find('-') != 5 or len(s.split('-')) != 2:
         return False
     helper = s.split('-')
     try:
-        left = datetime.datetime.strptime(helper[0], "%H:%M").time()
-        right = datetime.datetime.strptime(helper[1], "%H:%M").time()
+        datetime.datetime.strptime(helper[0], "%H:%M").time()
+        datetime.datetime.strptime(helper[1], "%H:%M").time()
         return True
     except ValueError:
         return False
 
 
-def isPositiveInt(x) -> bool:
+def is_positive_int(x) -> bool:
     if x <= 0:
         return False
     return True
 
 
 checker = FormatChecker()
-checker.checks("interval_time")(isIntervalTime)
-checker.checks("positive_int")(isPositiveInt)
+checker.checks("interval_time")(is_interval_time)
+checker.checks("positive_int")(is_positive_int)
 
 
-def isValidCourierDescription(courier) -> bool:
+def is_valid_courier(courier) -> bool:
     schema = {
         "type": "object",
         "properties": {
@@ -54,17 +50,17 @@ def isValidCourierDescription(courier) -> bool:
     return True
 
 
-def isValidJsonAddCourier(json_):
+def is_valid_json_add_courier(json_):
     not_valid = []
     if json_ is None or not ('data' in json_.keys()):
         return False
     for item in json_['data']:
-        if not isValidCourierDescription(item):
+        if not is_valid_courier(item):
             not_valid.append({"id": item['courier_id']})
     return not_valid
 
 
-def getCourierType(courier_type: str):
+def get_courier_type(courier_type: str):
     if courier_type == 'foot':
         return CourierType.foot
     if courier_type == 'bike':
@@ -74,7 +70,7 @@ def getCourierType(courier_type: str):
     return None
 
 
-def getIntervalByString(s: str):
+def get_interval_by_string(s: str):
     if len(s) != 11 or s.find('-') != 5 or len(s.split('-')) != 2:
         return False
     helper = s.split('-')
@@ -105,7 +101,7 @@ def is_valid_json_edit_info_courier(courier) -> bool:
 def get_interval_time_list(arr) -> [IntervalTime]:
     intervals: [IntervalTime] = []
     for i in arr:
-        interval = getIntervalByString(i)
+        interval = get_interval_by_string(i)
         if interval:
             intervals.append(IntervalTime(start_time=interval[0], finish_time=interval[1]))
     return intervals
@@ -137,8 +133,6 @@ def get_list_str_working_hours(intervals: [IntervalTime]) -> [str]:
 
 
 def get_info_courier(courier: Courier):
-    print(type(courier.regions))
-    print(courier.regions)
     return {
         "courier_id": courier.courier_id,
         "courier_type": courier.courier_type.name,
@@ -156,7 +150,7 @@ def index():
 
 @module.route('/couriers', methods=['POST'])
 def add_couriers():
-    error = isValidJsonAddCourier(request.json)
+    error = is_valid_json_add_courier(request.json)
     if type(error) == bool and not error:
         return {"validation_error": {}}, 400
     if len(error) != 0:
@@ -178,7 +172,7 @@ def add_couriers():
         regions = get_regions_list(item["regions"])
         courier = Courier(
             courier_id=item["courier_id"],
-            courier_type=getCourierType(item["courier_type"]),
+            courier_type=get_courier_type(item["courier_type"]),
             interval=intervals
         )
         db.session.add(courier)
@@ -203,7 +197,7 @@ def edit_courier(courier_id: str):
     json_ = request.json
     for key in json_:
         if key == "courier_type":
-            courier.courier_type = getCourierType(json_[key])
+            courier.courier_type = get_courier_type(json_[key])
         if key == "working_hours":
             courier.interval = get_interval_time_list(json_[key])
         if key == "regions":
