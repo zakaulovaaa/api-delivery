@@ -1,5 +1,5 @@
 from flask import Flask, Blueprint, request
-from .models import Courier, CourierType, Region, db, courier_region, IntervalTime, Order
+from .models import Courier, CourierType, Region, db, courier_region, IntervalTime, Order, ReadinessStatus
 import datetime
 from .Validation import Validation
 from jsonschema import validate, Draft7Validator, FormatChecker
@@ -80,6 +80,34 @@ def get_info_courier(courier: Courier):
         "regions": get_list_id_regions(courier.regions),
         "working_hours": get_list_str_working_hours(courier.interval)
     }
+
+
+def checked_intersection_of_time_intervals(time1: IntervalTime, time2: IntervalTime) -> bool:
+    # TODO проверка на интервалы
+    return False
+
+
+def checked_intersection_of_list_time_intervals(arr1: [IntervalTime], arr2: [IntervalTime]) -> bool:
+    for time1 in arr1:
+        for time2 in arr2:
+            pass
+
+    return False
+
+
+
+
+def findSuitableOrders(courier: Courier) -> [Order]:
+    orders = []
+    regions_list = get_list_id_regions(courier.regions)
+
+    helper = db.session.query(Order).filter(Order.status == ReadinessStatus.new).\
+        filter(Order.weight <= courier.courier_type.value).\
+        filter(Order.region.in_(regions_list)).all()
+
+    print(helper)
+
+    return orders
 
 
 @module.route('/', methods=['GET'])
@@ -176,7 +204,8 @@ def add_orders():
             order_id=item["order_id"],
             weight=item["weight"],
             region=region,
-            interval=intervals
+            interval=intervals,
+            status=ReadinessStatus.new
         )
         db.session.add(order)
         db.session.commit()
@@ -186,6 +215,18 @@ def add_orders():
 
 @module.route('/orders/assign', methods=["POST"])
 def orders_assign():
+    if not validator.is_valid_json_orders_assign(request.json):
+        return {}, 400
+
+    courier = db.session.query(Courier).get(request.json["courier_id"])
+    if courier is None:
+        return {}, 400
+
+    a = findSuitableOrders(courier)
+    print(courier.group_order)
+
+
+
     return "ORDERS ASSIGN"
 
 

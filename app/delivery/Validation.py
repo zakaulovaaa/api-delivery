@@ -102,4 +102,19 @@ class Validation:
         }
         return Draft7Validator(schema, format_checker=self.checker).is_valid(order)
 
+    def is_valid_json_orders_assign(self, json_):
+        schema = {
+            "type": "object",
+            "properties": {
+                "courier_id": {"type": "integer", "format": "positive_int"}
+            },
+            "required": [
+                "courier_id"
+            ],
+            "additionalProperties": False
+        }
+
+        return Draft7Validator(schema, format_checker=self.checker).is_valid(json_)
+
+
 
