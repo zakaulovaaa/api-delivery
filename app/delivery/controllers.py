@@ -1,7 +1,8 @@
 from flask import Flask, Blueprint, request
 from .models import Courier, CourierType, Region, db, courier_region, IntervalTime
-import datetime
-from jsonschema import validate, Draft6Validator
+import datetime, json
+from jsonschema import validate, Draft7Validator, FormatChecker
+from sqlalchemy import update
 import time
 
 # from ..database import db
@@ -9,28 +10,37 @@ import time
 module = Blueprint('delivery', __name__)
 
 
-def isPositiveList(arr: [int]) -> bool:
-    for x in arr:
-        if x <= 0:
-            return False
+def isIntervalTime(s: str) -> bool:
+    if len(s) != 11 or s.find('-') != 5 or len(s.split('-')) != 2:
+        return False
+    helper = s.split('-')
+    try:
+        left = datetime.datetime.strptime(helper[0], "%H:%M").time()
+        right = datetime.datetime.strptime(helper[1], "%H:%M").time()
+        return True
+    except ValueError:
+        return False
+
+
+def isPositiveInt(x) -> bool:
+    if x <= 0:
+        return False
     return True
 
 
-def isListStrIntervalTime(arr) -> bool:
-    for item in arr:
-        if not getIntervalByString(item):
-            return False
-    return True
+checker = FormatChecker()
+checker.checks("interval_time")(isIntervalTime)
+checker.checks("positive_int")(isPositiveInt)
 
 
 def isValidCourierDescription(courier) -> bool:
     schema = {
         "type": "object",
         "properties": {
-            "courier_id": {"type": "integer"},
+            "courier_id": {"type": "integer", "format": "positive_int"},
             "courier_type": {"type": "string", "enum": ["foot", "bike", "car"]},
-            "regions": {"type": "array", "items": {"type": "integer"}},
-            "working_hours": {"type": "array", "items": {"type": "string"}},
+            "regions": {"type": "array", "items": {"type": "integer", "format": "positive_int"}},
+            "working_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
         },
         "required": [
             "courier_id",
@@ -39,10 +49,9 @@ def isValidCourierDescription(courier) -> bool:
             "working_hours"
         ]
     }
-    if not Draft6Validator(schema).is_valid(courier):
+    if not Draft7Validator(schema, format_checker=checker).is_valid(courier):
         return False
-    return courier["courier_id"] > 0 and isPositiveList(courier["regions"]) and isListStrIntervalTime(
-        courier["working_hours"])
+    return True
 
 
 def isValidJsonAddCourier(json_):
@@ -77,6 +86,67 @@ def getIntervalByString(s: str):
         return False
 
 
+def is_valid_json_edit_info_courier(courier) -> bool:
+    schema = {
+        "type": "object",
+        "properties": {
+            "courier_type": {"type": "string", "enum": ["foot", "bike", "car"]},
+            "regions": {"type": "array", "items": {"type": "integer", "format": "positive_int"}},
+            "working_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
+        },
+        "additionalProperties": False
+    }
+
+    if not Draft7Validator(schema, format_checker=checker).is_valid(courier):
+        return False
+    return True
+
+
+def get_interval_time_list(arr) -> [IntervalTime]:
+    intervals: [IntervalTime] = []
+    for i in arr:
+        interval = getIntervalByString(i)
+        if interval:
+            intervals.append(IntervalTime(start_time=interval[0], finish_time=interval[1]))
+    return intervals
+
+
+def get_regions_list(arr) -> [Region]:
+    regions: [Region] = []
+    for region in arr:
+        helper = db.session.query(Region).get(region)
+        if helper is None:
+            helper = Region(region_id=region)
+            db.session.add(helper)
+        regions.append(helper)
+    return regions
+
+
+def get_list_id_regions(regions: [Region]) -> [int]:
+    ids_regions = []
+    for region in regions:
+        ids_regions.append(region.region_id)
+    return ids_regions
+
+
+def get_list_str_working_hours(intervals: [IntervalTime]) -> [str]:
+    list_intervals = []
+    for interval in intervals:
+        list_intervals.append(str(interval))
+    return list_intervals
+
+
+def get_info_courier(courier: Courier):
+    print(type(courier.regions))
+    print(courier.regions)
+    return {
+        "courier_id": courier.courier_id,
+        "courier_type": courier.courier_type.name,
+        "regions": get_list_id_regions(courier.regions),
+        "working_hours": get_list_str_working_hours(courier.interval)
+    }
+
+
 @module.route('/', methods=['GET'])
 def index():
     # получить всех курьеров из региона 23
@@ -104,20 +174,8 @@ def add_couriers():
             continue
 
         added_couriers.append({"id": item["courier_id"]})
-
-        intervals: [IntervalTime] = []
-        for i in item["working_hours"]:
-            interval = getIntervalByString(i)
-            if interval:
-                intervals.append(IntervalTime(start_time=interval[0], finish_time=interval[1]))
-        regions = []
-        for region in item["regions"]:
-            helper = db.session.query(Region).get(region)
-            if helper is None:
-                helper = Region(region_id=region)
-                db.session.add(helper)
-            regions.append(helper)
-
+        intervals: [IntervalTime] = get_interval_time_list(item["working_hours"])
+        regions = get_regions_list(item["regions"])
         courier = Courier(
             courier_id=item["courier_id"],
             courier_type=getCourierType(item["courier_type"]),
@@ -128,15 +186,33 @@ def add_couriers():
         for region in regions:
             helper = courier_region.insert().values(courier_id=courier.courier_id, region_id=region.region_id)
             db.session.execute(helper)
-
     db.session.commit()
-
     return {"couriers": added_couriers}, 201
 
 
 @module.route('/couriers/<courier_id>', methods=["PATCH"])
-def edit_courier(courier_id):
-    return "EDIT COURIER #" + courier_id + "\n" + str(request.json)
+def edit_courier(courier_id: str):
+    # TODO: посмотреть, как возвращать 400 без {}
+    if not courier_id:
+        return {}, 400
+    courier = db.session.query(Courier).get(courier_id)
+    if courier is None or not is_valid_json_edit_info_courier(request.json):
+        return {}, 400
+
+    # TODO: ДОБАВИТЬ УДАЛЕНИЕ ИЗ СПИСКА ЗАКАЗОВ ТЕ ЗАКАЗЫ, КОТОРЫЕ ЧУВАК УЖЕ НЕ МОЖЕТ ДОСТАВИТЬ
+    json_ = request.json
+    for key in json_:
+        if key == "courier_type":
+            courier.courier_type = getCourierType(json_[key])
+        if key == "working_hours":
+            courier.interval = get_interval_time_list(json_[key])
+        if key == "regions":
+            courier.regions = get_regions_list(json_[key])
+
+    db.session.add(courier)
+    db.session.commit()
+
+    return get_info_courier(courier), 200
 
 
 @module.route('/orders', methods=["POST"])
@@ -154,6 +230,6 @@ def order_complete():
     return "ORDER COMPLETE"
 
 
-@module.route('/couriers/<courier_id>', methods=["GET"])
-def get_info_courier(courier_id):
-    return "GET INFO COURIER #" + courier_id
+# @module.route('/couriers/<courier_id>', methods=["GET"])
+# def get_info_courier(courier_id):
+#     return "GET INFO COURIER #"

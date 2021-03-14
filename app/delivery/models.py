@@ -20,6 +20,9 @@ class Region(db.Model):
     region_id = db.Column(db.Integer, primary_key=True, autoincrement=False)
     courier = db.relationship("Courier", secondary=courier_region)
 
+    def __str__(self):
+        return str(self.region_id)
+
 
 class Courier(db.Model):
     __tablename__ = 'courier'
@@ -29,7 +32,15 @@ class Courier(db.Model):
     interval = db.relationship('IntervalTime', backref="courier")
 
     def __str__(self):
-        return self.courier_type + " " + self.courier_type
+        interval = ""
+        for i in self.interval:
+            interval += str(i) + ", "
+        regions = ""
+        for i in self.regions:
+            regions += str(i) + ", "
+
+        return "id: " + str(self.courier_id) + "||| type: " + str(self.courier_type.name) + "||| regions: " + regions + \
+               "||| intervals: " + interval
 
 
 class IntervalTime(db.Model):
@@ -38,6 +49,10 @@ class IntervalTime(db.Model):
     start_time = db.Column(db.Time())
     finish_time = db.Column(db.Time())
     courier_id = db.Column(db.Integer(), db.ForeignKey(Courier.courier_id))
+
+    def __str__(self):
+        return str(self.start_time.hour) + ":" + str(self.start_time.minute) + "-" \
+               + str(self.finish_time.hour) + ":" + str(self.finish_time.minute)
 
 
 
