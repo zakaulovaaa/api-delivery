@@ -1,63 +1,12 @@
 from flask import Flask, Blueprint, request
-from .models import Courier, CourierType, Region, db, courier_region, IntervalTime
+from .models import Courier, CourierType, Region, db, courier_region, IntervalTime, Order
 import datetime
+from .Validation import Validation
 from jsonschema import validate, Draft7Validator, FormatChecker
 
 module = Blueprint('delivery', __name__)
 
-
-def is_interval_time(s: str) -> bool:
-    if len(s) != 11 or s.find('-') != 5 or len(s.split('-')) != 2:
-        return False
-    helper = s.split('-')
-    try:
-        datetime.datetime.strptime(helper[0], "%H:%M").time()
-        datetime.datetime.strptime(helper[1], "%H:%M").time()
-        return True
-    except ValueError:
-        return False
-
-
-def is_positive_int(x) -> bool:
-    if x <= 0:
-        return False
-    return True
-
-
-checker = FormatChecker()
-checker.checks("interval_time")(is_interval_time)
-checker.checks("positive_int")(is_positive_int)
-
-
-def is_valid_courier(courier) -> bool:
-    schema = {
-        "type": "object",
-        "properties": {
-            "courier_id": {"type": "integer", "format": "positive_int"},
-            "courier_type": {"type": "string", "enum": ["foot", "bike", "car"]},
-            "regions": {"type": "array", "items": {"type": "integer", "format": "positive_int"}},
-            "working_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
-        },
-        "required": [
-            "courier_id",
-            "courier_type",
-            "regions",
-            "working_hours"
-        ]
-    }
-    if not Draft7Validator(schema, format_checker=checker).is_valid(courier):
-        return False
-    return True
-
-
-def is_valid_json_add_courier(json_):
-    not_valid = []
-    if json_ is None or not ('data' in json_.keys()):
-        return False
-    for item in json_['data']:
-        if not is_valid_courier(item):
-            not_valid.append({"id": item['courier_id']})
-    return not_valid
+validator = Validation()
 
 
 def get_courier_type(courier_type: str):
@@ -82,22 +31,6 @@ def get_interval_by_string(s: str):
         return False
 
 
-def is_valid_json_edit_info_courier(courier) -> bool:
-    schema = {
-        "type": "object",
-        "properties": {
-            "courier_type": {"type": "string", "enum": ["foot", "bike", "car"]},
-            "regions": {"type": "array", "items": {"type": "integer", "format": "positive_int"}},
-            "working_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
-        },
-        "additionalProperties": False
-    }
-
-    if not Draft7Validator(schema, format_checker=checker).is_valid(courier):
-        return False
-    return True
-
-
 def get_interval_time_list(arr) -> [IntervalTime]:
     intervals: [IntervalTime] = []
     for i in arr:
@@ -116,6 +49,14 @@ def get_regions_list(arr) -> [Region]:
             db.session.add(helper)
         regions.append(helper)
     return regions
+
+
+def get_region(region: int) -> Region:
+    helper = db.session.query(Region).get(region)
+    if helper is None:
+        helper = Region(region_id=region)
+        db.session.add(helper)
+    return helper
 
 
 def get_list_id_regions(regions: [Region]) -> [int]:
@@ -150,7 +91,7 @@ def index():
 
 @module.route('/couriers', methods=['POST'])
 def add_couriers():
-    error = is_valid_json_add_courier(request.json)
+    error = validator.is_valid_json_add_courier(request.json)
     if type(error) == bool and not error:
         return {"validation_error": {}}, 400
     if len(error) != 0:
@@ -190,7 +131,7 @@ def edit_courier(courier_id: str):
     if not courier_id:
         return {}, 400
     courier = db.session.query(Courier).get(courier_id)
-    if courier is None or not is_valid_json_edit_info_courier(request.json):
+    if courier is None or not validator.is_valid_json_edit_info_courier(request.json):
         return {}, 400
 
     # TODO: ДОБАВИТЬ УДАЛЕНИЕ ИЗ СПИСКА ЗАКАЗОВ ТЕ ЗАКАЗЫ, КОТОРЫЕ ЧУВАК УЖЕ НЕ МОЖЕТ ДОСТАВИТЬ
@@ -211,7 +152,36 @@ def edit_courier(courier_id: str):
 
 @module.route('/orders', methods=["POST"])
 def add_orders():
-    return "ADD ORDERS\n" + str(request.json)
+    error = validator.is_valid_json_add_orders(request.json)
+    if type(error) == bool and not error:
+        return {"validation_error": {}}, 400
+    if len(error) != 0:
+        return {
+                   "validation_error": {
+                       "orders": error
+                   }
+               }, 400
+
+    added_orders = []
+    for item in request.json["data"]:
+        # Если пытаемся повторно кого-то добавить
+        helper = db.session.query(Order).get(item["order_id"])
+        if helper is not None:
+            continue
+
+        added_orders.append({"id": item["order_id"]})
+        intervals: [IntervalTime] = get_interval_time_list(item["delivery_hours"])
+        region = get_region(item["region"])
+        order = Order(
+            order_id=item["order_id"],
+            weight=item["weight"],
+            region=region,
+            interval=intervals
+        )
+        db.session.add(order)
+        db.session.commit()
+    db.session.commit()
+    return {"orders": added_orders}, 201
 
 
 @module.route('/orders/assign', methods=["POST"])

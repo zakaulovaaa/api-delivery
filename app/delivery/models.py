@@ -15,15 +15,6 @@ courier_region = db.Table('courier_region',
 )
 
 
-class Region(db.Model):
-    __tablename__ = 'region'
-    region_id = db.Column(db.Integer, primary_key=True, autoincrement=False)
-    courier = db.relationship("Courier", secondary=courier_region)
-
-    def __str__(self):
-        return str(self.region_id)
-
-
 class Courier(db.Model):
     __tablename__ = 'courier'
     courier_id = db.Column(db.Integer(), primary_key=True, autoincrement=False)
@@ -43,16 +34,36 @@ class Courier(db.Model):
                "||| intervals: " + interval
 
 
+class Region(db.Model):
+    __tablename__ = 'region'
+    region_id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    courier = db.relationship("Courier", secondary=courier_region)
+    order = db.relationship("Order", backref="region_order")
+
+    def __str__(self):
+        return str(self.region_id)
+
+
+class Order(db.Model):
+    __tablename__ = "order"
+    order_id = db.Column(db.Integer(), primary_key=True, autoincrement=False)
+    weight = db.Column(db.Float())
+    region = db.Column(db.Integer(), db.ForeignKey(Region.region_id))
+    interval = db.relationship('IntervalTime', backref="order")
+
+
 class IntervalTime(db.Model):
     __tablename__ = 'interval_time'
     id = db.Column(db.Integer, primary_key=True)
     start_time = db.Column(db.Time())
     finish_time = db.Column(db.Time())
     courier_id = db.Column(db.Integer(), db.ForeignKey(Courier.courier_id))
+    order_id = db.Column(db.Integer(), db.ForeignKey(Order.order_id))
 
     def __str__(self):
-        return str(self.start_time.hour) + ":" + str(self.start_time.minute) + "-" \
-               + str(self.finish_time.hour) + ":" + str(self.finish_time.minute)
+        start = self.start_time.strftime("%H:%M")
+        finish = self.finish_time.strftime("%H:%M")
+        return start + ":" + finish
 
 
 
