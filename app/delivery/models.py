@@ -29,17 +29,6 @@ class Courier(db.Model):
     interval = db.relationship('IntervalTime', backref="courier")
     group_order = db.relationship('GroupOrder', backref="courier_groups_orders")
 
-    def __str__(self):
-        interval = ""
-        for i in self.interval:
-            interval += str(i) + ", "
-        regions = ""
-        for i in self.regions:
-            regions += str(i) + ", "
-
-        return "id: " + str(self.courier_id) + "||| type: " + str(self.courier_type.name) + "||| regions: " + regions + \
-               "||| intervals: " + interval
-
 
 class Region(db.Model):
     __tablename__ = 'region'

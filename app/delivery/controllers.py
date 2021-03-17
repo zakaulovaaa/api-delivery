@@ -1,7 +1,9 @@
 from flask import Flask, Blueprint, request
-from .models import Courier, CourierType, Region, db, courier_region, IntervalTime, Order, ReadinessStatus
+from .models import Courier, CourierType, Region, db, courier_region, IntervalTime, Order, ReadinessStatus, GroupOrder
 import datetime
 from .Validation import Validation
+from sqlalchemy import or_, and_
+
 from jsonschema import validate, Draft7Validator, FormatChecker
 
 module = Blueprint('delivery', __name__)
@@ -82,32 +84,49 @@ def get_info_courier(courier: Courier):
     }
 
 
-def checked_intersection_of_time_intervals(time1: IntervalTime, time2: IntervalTime) -> bool:
-    # TODO проверка на интервалы
-    return False
-
-
-def checked_intersection_of_list_time_intervals(arr1: [IntervalTime], arr2: [IntervalTime]) -> bool:
-    for time1 in arr1:
-        for time2 in arr2:
-            pass
-
-    return False
-
-
+# получить список интервалов для фильтра. если х = 1, то start < finish, -1 -- start > finish
+def get_list_interval_for_filter(arr: [IntervalTime], x: int):
+    intervals = []
+    for interval in arr:
+        if x == 1 and interval.start_time < interval.finish_time:
+            intervals.append(interval)
+        if x == -1 and interval.start_time > interval.finish_time:
+            intervals.append(interval)
+    return intervals
 
 
 def findSuitableOrders(courier: Courier) -> [Order]:
     orders = []
+    if len(courier.interval) == 0:
+        return orders
+
+    intervals_courier_norm = get_list_interval_for_filter(courier.interval, 1)
+    intervals_courier_2 = get_list_interval_for_filter(courier.interval, -1)
+
+    finish_day_time = datetime.datetime.strptime("23:59", "%H:%M").time()
+    start_day_time = datetime.datetime.strptime("00:00", "%H:%M").time()
+
     regions_list = get_list_id_regions(courier.regions)
-
-    helper = db.session.query(Order).filter(Order.status == ReadinessStatus.new).\
+    orders = db.session.query(Order).filter(Order.status == ReadinessStatus.new).\
         filter(Order.weight <= courier.courier_type.value).\
-        filter(Order.region.in_(regions_list)).all()
-
-    print(helper)
-
+        filter(Order.region.in_(regions_list)).join(Order.interval).\
+        filter(or_(
+                *[IntervalTime.start_time.between(x.start_time, x.finish_time) for x in intervals_courier_norm],
+                *[IntervalTime.finish_time.between(x.start_time, x.finish_time) for x in intervals_courier_norm],
+                *[IntervalTime.start_time.between(x.start_time, finish_day_time) for x in intervals_courier_2],
+                *[IntervalTime.start_time.between(start_day_time, x.finish_time) for x in intervals_courier_2],
+                *[IntervalTime.finish_time.between(start_day_time, x.finish_time) for x in intervals_courier_2],
+                *[IntervalTime.finish_time.between(start_day_time, x.finish_time) for x in intervals_courier_2]
+            )
+    ).all()
     return orders
+
+
+def list_order_to_list_id(orders: [Order]):
+    ids = []
+    for item in orders:
+        ids.append({"id": item.order_id})
+    return ids
 
 
 @module.route('/', methods=['GET'])
@@ -222,12 +241,36 @@ def orders_assign():
     if courier is None:
         return {}, 400
 
-    a = findSuitableOrders(courier)
-    print(courier.group_order)
+    # недоделанная выборка у курьера
+    group = db.session.query(GroupOrder).filter(GroupOrder.courier == courier.courier_id).\
+        filter(GroupOrder.status == ReadinessStatus.in_working).all()
 
+    if len(group) == 0:
+        orders = findSuitableOrders(courier)
+        assign_time = datetime.datetime.now()
+        ans = {
+            "orders": list_order_to_list_id(orders),
+            "assign_time": assign_time
+        }
+        for order in orders:
+            order.status = ReadinessStatus.in_working
+        group_order = GroupOrder(
+            assign_time=assign_time,
+            status=ReadinessStatus.in_working,
+            courier=courier.courier_id,
+            orders=orders
+        )
+        db.session.add(group_order)
+        db.session.commit()
+    else:
+        orders = db.session.query(Order).filter(Order.group == group[0].id).\
+            filter(Order.status == ReadinessStatus.in_working).all()
+        ans = {
+            "orders": list_order_to_list_id(orders),
+            "assign_time": group[0].assign_time
+        }
 
-
-    return "ORDERS ASSIGN"
+    return ans, 200
 
 
 @module.route('/orders/complete', methods=["POST"])
