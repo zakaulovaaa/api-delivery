@@ -15,6 +15,14 @@ def is_interval_time(s: str) -> bool:
         return False
 
 
+def is_str_datetime_iso8601(date: str):
+    try:
+        _ = datetime.strptime(date, '%Y-%m-%dT%H:%M:%S.%f%z')
+        return True
+    except ValueError:
+        return False
+
+
 def is_positive_int(x: int) -> bool:
     if x <= 0:
         return False
@@ -33,6 +41,7 @@ class Validation:
         self.checker.checks("interval_time")(is_interval_time)
         self.checker.checks("positive_int")(is_positive_int)
         self.checker.checks("available_weight")(is_available_weight)
+        self.checker.checks("format_iso_8601")(is_str_datetime_iso8601)
 
     def is_valid_courier(self, courier) -> bool:
         schema = {
@@ -52,6 +61,25 @@ class Validation:
             "additionalProperties": False
         }
         return Draft7Validator(schema, format_checker=self.checker).is_valid(courier)
+
+    def is_valid_order(self, order) -> bool:
+        schema = {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "integer", "format": "positive_int"},
+                "weight": {"type": "number", "format": "available_weight"},
+                "region": {"type": "integer", "format": "positive_int"},
+                "delivery_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
+            },
+            "required": [
+                "order_id",
+                "weight",
+                "region",
+                "delivery_hours"
+            ],
+            "additionalProperties": False
+        }
+        return Draft7Validator(schema, format_checker=self.checker).is_valid(order)
 
     def is_valid_json_add_courier(self, json_) -> bool:
         not_valid = []
@@ -83,25 +111,6 @@ class Validation:
                 not_valid.append({"id": item['order_id']})
         return not_valid
 
-    def is_valid_order(self, order) -> bool:
-        schema = {
-            "type": "object",
-            "properties": {
-                "order_id": {"type": "integer", "format": "positive_int"},
-                "weight": {"type": "number", "format": "available_weight"},
-                "region": {"type": "integer", "format": "positive_int"},
-                "delivery_hours": {"type": "array", "items": {"type": "string", "format": "interval_time"}},
-            },
-            "required": [
-                "order_id",
-                "weight",
-                "region",
-                "delivery_hours"
-            ],
-            "additionalProperties": False
-        }
-        return Draft7Validator(schema, format_checker=self.checker).is_valid(order)
-
     def is_valid_json_orders_assign(self, json_):
         schema = {
             "type": "object",
@@ -115,6 +124,33 @@ class Validation:
         }
 
         return Draft7Validator(schema, format_checker=self.checker).is_valid(json_)
+
+    def is_valid_json_order_complete(self, json_):
+        schema = {
+            "type": "object",
+            "properties": {
+                "courier_id": {
+                    "type": "integer",
+                    "format": "positive_int"
+                },
+                "order_id": {
+                    "type": "integer",
+                    "format": "positive_int"
+                },
+                "complete_time": {
+                    "type": "string",
+                    "format": "format_iso_8601"
+                }
+            },
+            "additionalProperties": False
+        }
+
+        return Draft7Validator(schema, format_checker=self.checker).is_valid(json_)
+
+
+
+
+
 
 
 
